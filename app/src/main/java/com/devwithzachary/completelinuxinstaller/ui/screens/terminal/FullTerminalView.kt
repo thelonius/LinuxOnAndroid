@@ -54,6 +54,18 @@ import com.devwithzachary.completelinuxinstaller.engine.TerminalBridge
 import com.devwithzachary.completelinuxinstaller.engine.TerminalChar
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import androidx.compose.animation.core.AnimationState
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateDecay
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 
 @Composable
 fun FullTerminalView(
@@ -83,7 +95,7 @@ fun FullTerminalView(
     var isDraggingEndHandle by remember { mutableStateOf(false) }
     var activeDragPixelY by remember { mutableFloatStateOf(-1f) }
     var activeDragPixelX by remember { mutableFloatStateOf(-1f) }
-    var accumulatedScrollY by remember { mutableFloatStateOf(0f) }
+    var pixelOffset by remember { mutableFloatStateOf(0f) }
     var showContextMenu by remember { mutableStateOf(false) }
     var contextMenuOffset by remember { mutableStateOf(Offset.Zero) }
 
@@ -147,7 +159,73 @@ fun FullTerminalView(
         val cols = max(20, (widthPx / charWidth).toInt())
         val rows = max(5, (heightPx / charHeight).toInt())
 
-        LaunchedEffect(activeSessionId) {
+        // --- Pixel-smooth scrolling ---
+        // Position in px from the bottom = scrollOffset * charHeight + pixelOffset; pixelOffset is in [0, charHeight).
+        // At rest pixelOffset is always 0 (snapToLine) so hit-testing by row stays exact.
+        val scrollScope = rememberCoroutineScope()
+        val scrollJobHolder = remember { arrayOfNulls<Job>(1) }
+        val velocityTracker = remember { VelocityTracker() }
+        val flingDecay = remember(density) { splineBasedDecay<Float>(density) }
+
+        // dy > 0: content moves down (history comes into view). Returns px actually consumed.
+        fun scrollByPx(dy: Float): Float {
+            val emulator = terminalBridge.emulator
+            val histLines = emulator.scrollback.size
+            val cur = emulator.scrollOffset * charHeight + pixelOffset
+            val next = (cur + dy).coerceIn(0f, histLines * charHeight)
+            val lines = min((next / charHeight).toInt(), histLines)
+            val diff = lines - emulator.scrollOffset
+            if (diff > 0) terminalBridge.scrollUp(diff) else if (diff < 0) terminalBridge.scrollDown(-diff)
+            pixelOffset = if (lines >= histLines) 0f else next - lines * charHeight
+            return next - cur
+        }
+
+        fun snapToLine() {
+            val emulator = terminalBridge.emulator
+            val target = ((emulator.scrollOffset * charHeight + pixelOffset) / charHeight)
+                .roundToInt().coerceIn(0, emulator.scrollback.size)
+            val diff = target - emulator.scrollOffset
+            if (diff > 0) terminalBridge.scrollUp(diff) else if (diff < 0) terminalBridge.scrollDown(-diff)
+            pixelOffset = 0f
+        }
+
+        suspend fun settleToLine() {
+            val from = pixelOffset
+            if (from != 0f) {
+                var last = from
+                val to = if (from >= charHeight / 2f) charHeight else 0f
+                animate(from, to, animationSpec = tween(100)) { v, _ ->
+                    scrollByPx(v - last)
+                    last = v
+                }
+            }
+            snapToLine()
+        }
+
+        fun settle() {
+            scrollJobHolder[0]?.cancel()
+            scrollJobHolder[0] = scrollScope.launch { settleToLine() }
+        }
+
+        fun fling(velocity: Float) {
+            scrollJobHolder[0]?.cancel()
+            scrollJobHolder[0] = scrollScope.launch {
+                if (abs(velocity) > 200f) {
+                    var last = 0f
+                    AnimationState(0f, velocity).animateDecay(flingDecay) {
+                        val delta = value - last
+                        last = value
+                        val consumed = scrollByPx(delta)
+                        if (abs(delta - consumed) > 0.5f) cancelAnimation() // hit top or bottom
+                    }
+                }
+                settleToLine()
+            }
+        }
+
+        LaunchedEffect(activeSessionId, charHeight) {
+            scrollJobHolder[0]?.cancel()
+            pixelOffset = 0f
             selectionStart = null
             selectionEnd = null
             textFieldValue = TextFieldValue("", TextRange.Zero)
@@ -245,26 +323,27 @@ fun FullTerminalView(
                         }
                     }
                 }
+                .pointerInput(Unit) {
+                    // Touch-down stops an in-flight fling and settles onto a line boundary.
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        if (scrollJobHolder[0]?.isActive == true) settle()
+                    }
+                }
                 .pointerInput(cols, rows) {
-                    // Direct smooth scrolling with vertical dragging
+                    // Pixel-accurate drag scrolling with fling on release.
                     detectDragGestures(
                         onDragStart = {
-                            accumulatedScrollY = 0f
+                            scrollJobHolder[0]?.cancel()
+                            velocityTracker.resetTracking()
                         },
                         onDrag = { change, dragAmount ->
                             change.consume()
-                            accumulatedScrollY += dragAmount.y
-                            val threshold = charHeight * 0.75f
-                            if (accumulatedScrollY > threshold) {
-                                val lines = (accumulatedScrollY / charHeight).toInt().coerceAtLeast(1)
-                                terminalBridge.scrollUp(lines)
-                                accumulatedScrollY %= charHeight
-                            } else if (accumulatedScrollY < -threshold) {
-                                val lines = (-accumulatedScrollY / charHeight).toInt().coerceAtLeast(1)
-                                terminalBridge.scrollDown(lines)
-                                accumulatedScrollY %= charHeight
-                            }
-                        }
+                            velocityTracker.addPosition(change.uptimeMillis, change.position)
+                            scrollByPx(dragAmount.y)
+                        },
+                        onDragEnd = { fling(velocityTracker.calculateVelocity().y) },
+                        onDragCancel = { settle() }
                     )
                 }
                 .pointerInput(cols, rows) {
@@ -478,7 +557,7 @@ fun FullTerminalView(
             )
 
             // Terminal Screen & Text Selection Canvas
-            Canvas(modifier = Modifier.fillMaxSize()) {
+            Canvas(modifier = Modifier.fillMaxSize().clipToBounds()) {
                 @Suppress("UNUSED_VARIABLE")
                 val sessionKey = activeSessionId
                 @Suppress("UNUSED_VARIABLE")
@@ -496,8 +575,12 @@ fun FullTerminalView(
                 val renderRows = min(rows, emulator.rows)
                 val nativeCanvas = drawContext.canvas.nativeCanvas
 
-                for (r in 0 until renderRows) {
-                    val rowY = r * charHeight
+                // Sub-line pixel scroll: shift rows by pixelOffset and draw one extra row above.
+                val py = pixelOffset
+                val firstRow = if (py > 0f) -1 else 0
+
+                for (r in firstRow until renderRows) {
+                    val rowY = r * charHeight + py
                     val rowChars = emulator.getRenderRow(r)
                     val actualCols = rowChars.size
 
