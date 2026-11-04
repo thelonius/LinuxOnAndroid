@@ -51,6 +51,8 @@ enum class AppScreen(val titleRes: Int) {
 @Composable
 fun MainAppContent(viewModel: MainViewModel) {
     val windowSizeClass = rememberWindowSizeClass()
+    val hideSideRail by viewModel.hideSideRail.collectAsState()
+    val useBottomNav = windowSizeClass.isCompact || hideSideRail
     val dashboardState by viewModel.dashboardState.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
     val backupState by viewModel.backupState.collectAsStateWithLifecycle()
@@ -142,7 +144,7 @@ fun MainAppContent(viewModel: MainViewModel) {
                 contentWindowInsets = if (isTerminal || (isDesktop && isDesktopRunning)) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
                 bottomBar = {
                     val isImeVisible = WindowInsets.isImeVisible
-                    if (windowSizeClass.isCompact && (isInstalled || splashDismissed) && !isFullscreenScreen &&
+                    if (useBottomNav && (isInstalled || splashDismissed) && !isFullscreenScreen &&
                         !((currentScreen == AppScreen.TERMINAL || (currentScreen == AppScreen.DESKTOP && isDesktopRunning)) && isImeVisible)) {
                         NavigationBar {
                             NavigationBarItem(
@@ -218,9 +220,9 @@ fun MainAppContent(viewModel: MainViewModel) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(bottom = if (windowSizeClass.isCompact) innerPadding.calculateBottomPadding() else 0.dp)
+                        .padding(bottom = if (useBottomNav) innerPadding.calculateBottomPadding() else 0.dp)
                 ) {
-                    if (windowSizeClass.isMediumOrExpanded && (isInstalled || splashDismissed) && !isFullscreenScreen) {
+                    if (!useBottomNav && (isInstalled || splashDismissed) && !isFullscreenScreen) {
                         NavigationRail(
                             modifier = Modifier
                                 .fillMaxHeight()
@@ -596,6 +598,8 @@ fun MainAppContent(viewModel: MainViewModel) {
                             onToggleKeepAlive = { viewModel.toggleKeepAlive() },
                             isKeepScreenOnEnabled = isKeepScreenOnEnabled,
                             onSetKeepScreenOn = { enabled -> viewModel.setKeepScreenOnEnabled(enabled) },
+                            hideSideRail = hideSideRail,
+                            onSetHideSideRail = { hide -> viewModel.setHideSideRail(hide) },
                             isGitHubUpdateCheckEnabled = isGitHubUpdateCheckEnabled,
                             onSetGitHubUpdateCheckEnabled = { enabled -> viewModel.setGitHubUpdateCheckEnabled(enabled) },
                             isCheckingForUpdates = isCheckingForUpdates,

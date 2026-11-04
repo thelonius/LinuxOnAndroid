@@ -46,6 +46,8 @@ fun SettingsScreen(
     onToggleKeepAlive: () -> Unit = {},
     isKeepScreenOnEnabled: Boolean = true,
     onSetKeepScreenOn: (Boolean) -> Unit = {},
+    hideSideRail: Boolean = false,
+    onSetHideSideRail: (Boolean) -> Unit = {},
     isGitHubUpdateCheckEnabled: Boolean = false,
     onSetGitHubUpdateCheckEnabled: (Boolean) -> Unit = {},
     isCheckingForUpdates: Boolean = false,
@@ -107,7 +109,9 @@ fun SettingsScreen(
             isKeepAliveEnabled = isKeepAliveEnabled,
             onToggleKeepAlive = onToggleKeepAlive,
             isKeepScreenOnEnabled = isKeepScreenOnEnabled,
-            onSetKeepScreenOn = onSetKeepScreenOn
+            onSetKeepScreenOn = onSetKeepScreenOn,
+            hideSideRail = hideSideRail,
+            onSetHideSideRail = onSetHideSideRail
         )
     }
 

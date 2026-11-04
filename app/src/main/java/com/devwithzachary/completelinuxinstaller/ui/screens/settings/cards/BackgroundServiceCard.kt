@@ -32,6 +32,8 @@ fun BackgroundServiceCard(
     onToggleKeepAlive: () -> Unit,
     isKeepScreenOnEnabled: Boolean,
     onSetKeepScreenOn: (Boolean) -> Unit,
+    hideSideRail: Boolean,
+    onSetHideSideRail: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -102,6 +104,25 @@ fun BackgroundServiceCard(
             Switch(
                 checked = isKeepScreenOnEnabled,
                 onCheckedChange = { onSetKeepScreenOn(it) }
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Hide side navigation panel", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Use the bottom navigation bar on wide screens instead of the left panel.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = hideSideRail,
+                onCheckedChange = { onSetHideSideRail(it) }
             )
         }
 

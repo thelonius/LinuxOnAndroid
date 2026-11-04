@@ -330,6 +330,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isKeepScreenOnEnabled = MutableStateFlow(loadKeepScreenOnEnabled())
     val isKeepScreenOnEnabled: StateFlow<Boolean> = _isKeepScreenOnEnabled.asStateFlow()
 
+    private val _hideSideRail = MutableStateFlow(prefs.getBoolean("hide_side_rail", false))
+    val hideSideRail: StateFlow<Boolean> = _hideSideRail.asStateFlow()
+
+    fun setHideSideRail(hide: Boolean) {
+        prefs.edit().putBoolean("hide_side_rail", hide).apply()
+        _hideSideRail.value = hide
+    }
+
     fun setKeepScreenOnEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("terminal_keep_screen_on", enabled).apply()
         _isKeepScreenOnEnabled.value = enabled
